@@ -50,11 +50,15 @@ exports.open = function(path, readCb, segmentCb, cb){
 	
 	function makePausable(ws){
 		var p = 0;
+		//var ended
 		ws.pause = function(){
+			//if(ended) throw new Error('already ended')			
+			console.log('pause')
 			++p;
 		}
 		ws.resume = function(){
 			--p;
+			console.log('resume: ' + p)
 			if(p === 0) flush()
 		}
 		var bufs = []
@@ -64,13 +68,25 @@ exports.open = function(path, readCb, segmentCb, cb){
 				oldWrite(buf)
 			})
 			bufs = []
+			if(waitingForEnd){
+				//ended = true
+				waitingForEnd()
+				waitingForEnd = false
+			}
 		}
 		ws.write = function(buf){
 			_.assertBuffer(buf)
 			if(p > 0) bufs.push(buf)
 			else oldWrite(buf)
 		}
+		var waitingForEnd
 		ws.end = function(cb){
+			if(p > 0){
+				console.log('waiting for end')
+				waitingForEnd = cb
+				return
+			}
+			//ended = true
 			//_.errout('TODO')
 			_.assertEqual(p, 0)
 			//ws.end(cb)
@@ -81,7 +97,7 @@ exports.open = function(path, readCb, segmentCb, cb){
 	
 	var segmentationFd
 	
-	console.log('locking on ' + path+'.segmentation...')
+	//console.log('locking on ' + path+'.segmentation...')
 	fs.open(path+'.segmentation', 'a+', function(err, fd){
 		if(err) throw err;
 		_.assertDefined(fd)
@@ -118,25 +134,70 @@ exports.open = function(path, readCb, segmentCb, cb){
 		var drainingSync = []
 		var draining = false;
 		var oldWrite = lws.write.bind(lws);
+
+		var ending = false
 		
 		lws.on('open', function(){
 			if(openCb) openCb()
 		})
+		
+		var buffering = false;
+		//var bufferingSync = []
 
 		var written = 0;
 		var writtenSinceLastSync = 0;
 		
+		var bufsBuffer = []
+		var writeTimeoutHandle;
 		lws.write = function(bufOrString, encoding){
+			if(ending) throw new Exception('cannot write after we have started ending')
 			if(_.isString(bufOrString)){
 				encoding = encoding || 'utf8'
 				bufOrString = new Buffer(bufOrString, encoding);
 			}
 			written += bufOrString.length
-			console.log('ws file: ' + newPath)
-			console.log('wrote to oldWrite: ' + bufOrString.length)
-			var res = oldWrite(bufOrString)
-			if(!res) draining = true;
+			//console.log('ws file: ' + newPath)
+			//console.log('wrote to oldWrite: ' + bufOrString.length)
+			buffering = true
+			bufsBuffer.push(bufOrString)
+			if(writeTimeoutHandle === undefined){
+				writeTimeoutHandle = setTimeout(writeLater, 50)
+			}
 		}
+		var rr = Math.random()
+		function forceWrite(){
+			console.log('forcing write')
+			_.assertDefined(writeTimeoutHandle)
+			clearTimeout(writeTimeoutHandle)
+			writeLater()
+		}
+		
+		function writeLater(){
+			_.assert(!ending)
+			_.assert(bufsBuffer.length > 0)
+			writeTimeoutHandle = undefined
+			var total = 0
+			for(var i=0;i<bufsBuffer.length;++i){
+				total += bufsBuffer[i].length
+			}
+			var nb = new Buffer(total)
+			var off = 0
+			for(var i=0;i<bufsBuffer.length;++i){
+				var b = bufsBuffer[i]
+				b.copy(nb, off)
+				off += b.length
+			}
+			console.log(rr + ' writing: ' + nb.length)
+			var res = oldWrite(nb)
+			draining = draining || !res
+			buffering = false
+			bufsBuffer = []
+
+			//bufferingSync.forEach(lws.sync)
+			//bufferingSync = []
+		}
+		
+		
 		
 		var fd;
 		var delayedSync;
@@ -146,10 +207,12 @@ exports.open = function(path, readCb, segmentCb, cb){
 			fsyncWaiter = _.doOnce(
 				function(written){return written;},
 				function(w, cb){
+					//console.log('fsyncing fd: ' + fd)
 					fs.fsync(fd, function(err){
 						if(err) throw err;
 
 						writtenSinceLastSync = w
+						//console.log('cbing sync')
 						cb()
 					})
 				},
@@ -163,6 +226,7 @@ exports.open = function(path, readCb, segmentCb, cb){
 			fs.open(newPath, 'a+', function(err, theFd){
 				if(err) throw err;
 				fd = theFd;
+				//console.log('opened: ' + newPath + ' ' + delayedSync.length)
 				initFsyncWaiter()
 				processDelayedSync()
 			})
@@ -179,9 +243,17 @@ exports.open = function(path, readCb, segmentCb, cb){
 				if(delayedSync === undefined){
 					openFd()
 				}
-				delayedSync.push(cb);
+				//console.log('delayed sync')
+				delayedSync.push(function(){
+					//console.log('undelayed sync')
+					cb()
+				});
 			}else{
-				fsyncWaiter(written, cb)
+				//console.log('waiter sync')
+				fsyncWaiter(written, function(){
+					//console.log('fsync waiter returned')
+					cb()
+				})
 			}
 		}
 		function processDelayedSync(){
@@ -192,13 +264,21 @@ exports.open = function(path, readCb, segmentCb, cb){
 				return;
 			}
 			ds.forEach(function(cb){
-				fsyncWaiter(written, cb)
+				fsyncWaiter(written, function(){
+					//console.log('in process-delayed-sync')
+					cb()
+				})
 			})
 		}
 
 		var closed = false;
 		
 		lws.sync = function(cb){
+			//console.log('syncing!!!!!!!!!!!1')
+			if(buffering){
+				forceWrite()
+			}
+			//console.log('cont')
 			if(oldWs){
 				oldWs.sync(function(){
 					oldWs = undefined;
@@ -210,18 +290,25 @@ exports.open = function(path, readCb, segmentCb, cb){
 				process.nextTick(cb)
 				return;
 			}
-			
+						
 			if(draining){
+				//console.log('draining...')
 				drainingSync.push(cb)
 			}else{
 				sync(written, cb)
 			}
 		}
-		
 		var oldEnd = lws.end.bind(lws);
 		lws.end = function(){
+			//console.log(rr + ' ending')
+			if(buffering){
+				forceWrite()
+			}
+			ending = true
 			if(draining){
+				//console.log('waiting for drain')
 				lws.once('drain', function(){
+					//console.log(rr + ' got drain')
 					oldEnd()
 				});
 			}else{
@@ -232,8 +319,10 @@ exports.open = function(path, readCb, segmentCb, cb){
 		lws.on('drain', function(){
 			if(draining){
 				draining = false;
-				drainingSync.forEach(lws.sync)
+				//console.log('drained: ' + drainingSync.length)
+				var ds = drainingSync
 				drainingSync = []
+				ds.forEach(lws.sync)
 			}
 		})
 
@@ -414,7 +503,7 @@ exports.open = function(path, readCb, segmentCb, cb){
 		
 		//var readOut = 0;
 		
-		_.extend(w, {
+		var handle = {
 			readRange: function(pos, len, cb){//must not span multiple segments
 				var off = 0;
 				var remainingOff;
@@ -468,7 +557,7 @@ exports.open = function(path, readCb, segmentCb, cb){
 				currentSegmentSize += buf.length;
 				var to = totalOffset;
 				totalOffset += buf.length;
-				console.log('segmented file wrote to ws: ' + buf.length)
+				//console.log('segmented file wrote to ws: ' + buf.length)
 				ws.write(buf)
 				return to;
 			},
@@ -494,9 +583,9 @@ exports.open = function(path, readCb, segmentCb, cb){
 				//console.log('finishing segment ' + si + ' ' + currentSegmentSize)
 				currentSegmentSize = 0;
 				segmentIsFinishing[si] = []
-				//console.log('finishing ' + si)
+				console.log('finishing ' + si)
 				ws.sync(function(){
-					//console.log('synced ' + si)	
+					console.log('synced ' + si)	
 					var list = segmentIsFinishing[si];
 					list.forEach(function(cb){cb();})
 					delete segmentIsFinishing[si];
@@ -508,22 +597,28 @@ exports.open = function(path, readCb, segmentCb, cb){
 				return currentSegmentSize;
 			},
 			end: function(cb){
-				var cdl = _.latch(3, function(){
+				var cdl = _.latch(2, function(){
+					console.log('closed segmented file')
 					if(cb) cb();
 				})
 				_.assertDefined(segmentationFd)
 				fsExt.flock(segmentationFd, 'un', function(err){
 					if(err) throw err
-					console.log('unlocked segmentation file: ' + path + '.segmentation')
+					//console.log('unlocked segmentation file: ' + path + '.segmentation')
 					fs.close(segmentationFd, function(){
 						cdl()
-						mw.end(cdl)
-						mws.end(cdl);
+						console.log('finished close')
+						mw.end(function(){console.log('finished mw');cdl()})
+						//mws.end(function(){console.log('finished mws');cdl()});
 					})
 				})
 				//ws.end()
 				//cdl()
 			}
+		}
+		//_.extend(w, handle)
+		Object.keys(handle).forEach(function(key){
+			w[key] = handle[key]
 		})
 		cb(w)
 	}

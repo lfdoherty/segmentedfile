@@ -1,6 +1,6 @@
 {
 	"name": "segmentedfile",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Provides a segmented file abstraction for e.g. db development.",
 	"main": "./segmentedfile",
 	"author": "Liam Doherty",
@@ -10,6 +10,6 @@
 		"fs-ext": "*"
 	},
 	"engines": {
-		 "node" : "0.6"
+		 "node" : ">=0.6"
 	}
 }
