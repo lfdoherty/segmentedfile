@@ -6,6 +6,8 @@ var fsExt = require('fs-ext');
 
 var EventEmitter = require('events').EventEmitter;
 
+var log = require('quicklog').make('segmentedfile')
+
 var _ = require('underscorem')
 var parsicle = require('parsicle');
 
@@ -53,12 +55,12 @@ exports.open = function(path, readCb, segmentCb, cb){
 		//var ended
 		ws.pause = function(){
 			//if(ended) throw new Error('already ended')			
-			console.log('pause')
+			log('pause')
 			++p;
 		}
 		ws.resume = function(){
 			--p;
-			console.log('resume: ' + p)
+			log('resume: ' + p)
 			if(p === 0) flush()
 		}
 		var bufs = []
@@ -82,7 +84,7 @@ exports.open = function(path, readCb, segmentCb, cb){
 		var waitingForEnd
 		ws.end = function(cb){
 			if(p > 0){
-				console.log('waiting for end')
+				log('waiting for end')
 				waitingForEnd = cb
 				return
 			}
@@ -166,7 +168,7 @@ exports.open = function(path, readCb, segmentCb, cb){
 		}
 		var rr = Math.random()
 		function forceWrite(){
-			console.log('forcing write')
+			log('forcing write')
 			_.assertDefined(writeTimeoutHandle)
 			clearTimeout(writeTimeoutHandle)
 			writeLater()
@@ -187,7 +189,7 @@ exports.open = function(path, readCb, segmentCb, cb){
 				b.copy(nb, off)
 				off += b.length
 			}
-			console.log(rr + ' writing: ' + nb.length)
+			log(rr + ' writing: ' + nb.length)
 			var res = oldWrite(nb)
 			draining = draining || !res
 			buffering = false
@@ -583,9 +585,9 @@ exports.open = function(path, readCb, segmentCb, cb){
 				//console.log('finishing segment ' + si + ' ' + currentSegmentSize)
 				currentSegmentSize = 0;
 				segmentIsFinishing[si] = []
-				console.log('finishing ' + si)
+				log('finishing ' + si)
 				ws.sync(function(){
-					console.log('synced ' + si)	
+					log('synced ' + si)	
 					var list = segmentIsFinishing[si];
 					list.forEach(function(cb){cb();})
 					delete segmentIsFinishing[si];
@@ -598,7 +600,7 @@ exports.open = function(path, readCb, segmentCb, cb){
 			},
 			end: function(cb){
 				var cdl = _.latch(2, function(){
-					console.log('closed segmented file')
+					log('closed segmented file')
 					if(cb) cb();
 				})
 				_.assertDefined(segmentationFd)
@@ -607,8 +609,8 @@ exports.open = function(path, readCb, segmentCb, cb){
 					//console.log('unlocked segmentation file: ' + path + '.segmentation')
 					fs.close(segmentationFd, function(){
 						cdl()
-						console.log('finished close')
-						mw.end(function(){console.log('finished mw');cdl()})
+						log('finished close')
+						mw.end(function(){log('finished mw');cdl()})
 						//mws.end(function(){console.log('finished mws');cdl()});
 					})
 				})

@@ -1,13 +1,14 @@
 {
 	"name": "segmentedfile",
-	"version": "0.1.1",
+	"version": "0.1.3",
 	"description": "Provides a segmented file abstraction for e.g. db development.",
 	"main": "./segmentedfile",
 	"author": "Liam Doherty",
 	"dependencies" : { 
 		"underscorem": ">0.1",
 		"parsicle": "*",
-		"fs-ext": "*"
+		"fs-ext": "*",
+		"quicklog": "*"
 	},
 	"engines": {
 		 "node" : ">=0.6"
