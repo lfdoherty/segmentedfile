@@ -1,6 +1,6 @@
 {
 	"name": "segmentedfile",
-	"version": "0.1.3",
+	"version": "0.1.4",
 	"description": "Provides a segmented file abstraction for e.g. db development.",
 	"main": "./segmentedfile",
 	"author": "Liam Doherty",
