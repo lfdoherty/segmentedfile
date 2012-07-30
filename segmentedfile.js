@@ -6,7 +6,7 @@ var fsExt = require('fs-ext');
 
 var EventEmitter = require('events').EventEmitter;
 
-var log = require('quicklog').make('segmentedfile')
+var log = require('quicklog').make('segmentedfile/main')
 
 var _ = require('underscorem')
 var parsicle = require('parsicle');
